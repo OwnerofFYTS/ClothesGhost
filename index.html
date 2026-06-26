@@ -31,10 +31,25 @@
             z-index: 10; border-radius: 8px;
         }
         #loading { top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; z-index: 10; }
+        
+        /* Game Over Layout with Try Again Button */
         #gameover {
             top: 50%; left: 50%; transform: translate(-50%, -50%);
-            font-size: 48px; color: #ff0000; display: none; font-weight: bold;
-            text-shadow: 0 0 10px #000; z-index: 12;
+            display: none; z-index: 12; pointer-events: auto;
+        }
+        #gameover h1 {
+            font-size: 56px; color: #ff0000; margin: 0 0 20px 0; font-weight: bold;
+            text-shadow: 0 0 15px #000;
+        }
+        #btn-retry {
+            font-family: 'Courier New', Courier, monospace;
+            background: #ff3333; color: white; border: none;
+            padding: 12px 30px; font-size: 20px; font-weight: bold;
+            cursor: pointer; border-radius: 4px; box-shadow: 0 0 10px rgba(255,0,0,0.5);
+            transition: 0.2s;
+        }
+        #btn-retry:hover {
+            background: #ff1111; transform: scale(1.05);
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -51,14 +66,17 @@
         <h2>GHOST PURSUIT</h2>
         <p style="color: #ff3333; font-weight: bold;">CLICK HERE TO START</p>
         <p style="font-size: 16px; color: #aaa; text-align: left; line-height: 1.6;">
-            • <b>WASD</b> = Move Around<br>
+            • <b>WASD</b> = Move Around (S/A/D are slower!)<br>
             • <b>Mouse</b> = Look Around (Look down at your feet!)<br>
             • <b>E</b> = Pick Flashlight (When close to it)<br>
             • <b>ESC</b> = Pause Game & Release Mouse
         </p>
     </div>
 
-    <div id="gameover">YOU DIED!</div>
+    <div id="gameover">
+        <h1>YOU DIED!</h1>
+        <button id="btn-retry">TRY AGAIN</button>
+    </div>
 
     <script>
         let scene, camera, renderer, clock;
@@ -68,10 +86,11 @@
         let isGameOver = false;
         let isPaused = true;
 
-        // Player starting state
+        // Player movement setup
         const player = {
             pos: new THREE.Vector3(0, 1.6, 5), 
-            speed: 0.1
+            forwardSpeed: 0.1,    // Aage jaane ki tez speed
+            strafeSpeed: 0.05     // Baayein/Daayein aur Peeche hatne ki slow speed
         };
 
         const keys = { w: false, a: false, s: false, d: false, e: false };
@@ -84,10 +103,6 @@
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.copy(player.pos);
-            
-            // --- CRITICAL FIX FOR TILT ---
-            // 'YXZ' order lagane se camera pehle left-right (Y) ghoomega, fir up-down (X). 
-            // Is se Z-axis (tilt) bilkul lock ho jati hai aur screen kabi tedi nahi hoti.
             camera.rotation.order = 'YXZ';
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -113,17 +128,8 @@
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // Flashlight on Ground
-            const flashGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 12);
-            const flashMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
-            flashlightDropped = new THREE.Mesh(flashGeo, flashMat);
-            flashlightDropped.rotation.z = Math.PI / 2;
-            flashlightDropped.position.set(0, 0.1, 2); 
-            scene.add(flashlightDropped);
-
-            flashlightGlow = new THREE.PointLight(0x00ff00, 2, 3);
-            flashlightGlow.position.copy(flashlightDropped.position);
-            scene.add(flashlightGlow);
+            // Flashlight on Ground Create
+            createGroundFlashlight();
 
             // Spotlight Player Hand
             flashlight = new THREE.SpotLight(0xffffff, 8, 50, Math.PI / 4, 0.5, 1);
@@ -160,7 +166,7 @@
             document.addEventListener('keyup', (e) => handleKeys(e, false));
             document.addEventListener('mousemove', onMouseMove);
 
-            // Pointer Lock
+            // Pointer Lock UI Triggers
             const inst = document.getElementById('instructions');
             inst.addEventListener('click', () => {
                 if(!isGameOver) renderer.domElement.requestPointerLock();
@@ -177,7 +183,23 @@
                 }
             });
 
+            // Retry Button Click Listener
+            document.getElementById('btn-retry').addEventListener('click', resetGame);
+
             animate();
+        }
+
+        function createGroundFlashlight() {
+            const flashGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 12);
+            const flashMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
+            flashlightDropped = new THREE.Mesh(flashGeo, flashMat);
+            flashlightDropped.rotation.z = Math.PI / 2;
+            flashlightDropped.position.set(0, 0.1, 2); 
+            scene.add(flashlightDropped);
+
+            flashlightGlow = new THREE.PointLight(0x00ff00, 2, 3);
+            flashlightGlow.position.copy(flashlightDropped.position);
+            scene.add(flashlightGlow);
         }
 
         function handleKeys(e, isDown) {
@@ -200,18 +222,11 @@
             }
         }
 
-        // --- NEW SMOOTH & LOCKED MOUSE ROTATION ---
         function onMouseMove(e) {
             if (isPaused || isGameOver) return;
-
-            // Direct camera ki rotation me add karein (Euler rotation tracking)
-            camera.rotation.y -= e.movementX * 0.0025; // Yaw (Left / Right)
-            camera.rotation.x -= e.movementY * 0.0025; // Pitch (Up / Down)
-
-            // Look up aur look down par strict limit lagana taake camera flip na ho (90 degrees limit)
+            camera.rotation.y -= e.movementX * 0.0025; 
+            camera.rotation.x -= e.movementY * 0.0025; 
             camera.rotation.x = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, camera.rotation.x));
-            
-            // Z-axis (Tilt) ko zyadati se zero pe enforce rakhna
             camera.rotation.z = 0;
         }
 
@@ -228,13 +243,43 @@
             document.getElementById('gameover').style.display = 'block';
             document.getElementById('instructions').style.display = 'none';
 
-            // Death moment par camera ko instant straight line horizontally set karna
             camera.rotation.z = 0;
             camera.rotation.x = 0; 
             
             if (ghost) {
                 camera.lookAt(ghost.position.x, ghost.position.y + 1, ghost.position.z);
             }
+        }
+
+        // --- RESET GAME LOGIC FOR TRY AGAIN ---
+        function resetGame() {
+            isGameOver = false;
+            isPaused = true;
+            hasFlashlight = false;
+
+            // UI changes reset
+            document.getElementById('gameover').style.display = 'none';
+            document.getElementById('instructions').style.display = 'block';
+            document.getElementById('flashlight-status').innerText = "ZAMEEN PAR HAI (Look down & Press 'E' to Pick)";
+            document.getElementById('flashlight-status').style.color = "#ff3333";
+
+            // Positions reset
+            player.pos.set(0, 1.6, 5);
+            camera.position.copy(player.pos);
+            camera.rotation.set(0, 0, 0);
+
+            if (ghost) {
+                ghost.position.set(0, 0, -12);
+            }
+
+            // Flashlight on ground recreate if not already there
+            flashlight.visible = false;
+            scene.remove(flashlightDropped);
+            scene.remove(flashlightGlow);
+            createGroundFlashlight();
+
+            // Clear keys state
+            keys.w = keys.a = keys.s = keys.d = keys.e = false;
         }
 
         function animate() {
@@ -250,24 +295,21 @@
             const delta = clock.getDelta();
             if (mixer) mixer.update(delta);
 
-            // --- MOVEMENT RELATIVE TO FIXED CAMERA ---
-            // Move direction vectors dynamically create karte hain camera angle se
+            // Movement vectors
             const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
             const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
             
-            // Y component ko zero kar rahe hain taake player urhne ya zameen ke andar na ghuse chalte hue
             forward.y = 0; forward.normalize();
             right.y = 0; right.normalize();
 
-            if (keys.w) player.pos.addScaledVector(forward, player.speed);
-            if (keys.s) player.pos.addScaledVector(forward, -player.speed);
-            if (keys.d) player.pos.addScaledVector(right, player.speed);
-            if (keys.a) player.pos.addScaledVector(right, -player.speed);
+            // --- SEPARATE SPEED FOR BACKWARD & STRAFE ---
+            if (keys.w) player.pos.addScaledVector(forward, player.forwardSpeed); // Full Speed Forward
+            if (keys.s) player.pos.addScaledVector(forward, -player.strafeSpeed); // Slow Speed Backward
+            if (keys.d) player.pos.addScaledVector(right, player.strafeSpeed);    // Slow Speed Right
+            if (keys.a) player.pos.addScaledVector(right, -player.strafeSpeed);   // Slow Speed Left
 
-            // Sync Player Pos to Camera
             camera.position.copy(player.pos);
 
-            // Flashlight Position & Target Sync
             if (hasFlashlight) {
                 flashlight.position.copy(camera.position);
                 const flashDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
