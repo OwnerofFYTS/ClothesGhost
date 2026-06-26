@@ -3,31 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ghost Pursuit Game</title>
+    <title>Horror Ghost Escape</title>
     <style>
-        body {
+        body, html {
             margin: 0;
+            padding: 0;
             overflow: hidden;
             background-color: #050505;
-            font-family: sans-serif;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #ui, #loading, #gameover, #instructions {
+            position: absolute;
+            color: white;
+            user-select: none;
+            pointer-events: none;
+            text-align: center;
         }
         #ui {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #ff3333;
-            text-shadow: 0 0 5px #000;
-            font-size: 24px;
-            pointer-events: none;
-            user-select: none;
+            top: 20px; left: 20px; font-size: 18px; text-align: left;
+            text-shadow: 2px 2px 4px #000;
         }
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            font-size: 20px;
+        #instructions {
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 24px; background: rgba(0,0,0,0.8); padding: 20px;
+            border: 2px solid #ff3333; pointer-events: auto; cursor: pointer;
+        }
+        #loading { top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; }
+        #gameover {
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 48px; color: #ff0000; display: none; font-weight: bold;
+            text-shadow: 0 0 10px #000;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -35,129 +40,229 @@
 </head>
 <body>
 
-    <div id="ui">RUN AWAY FROM THE GHOST!</div>
-    <div id="loading">Loading Ghost...</div>
+    <div id="loading">Loading Ghost Model...</div>
+    <div id="ui">
+        Flashlight: <span id="flashlight-status" style="color:red;">Zameen Par Hai (Press 'E' to Pick)</span>
+    </div>
+    
+    <div id="instructions">
+        <h2>HORROR ESCAPE</h2>
+        <p>Click here to Play</p>
+        <p style="font-size: 16px; color: #aaa;">
+            WASD = Move | Mouse = Look Around<br>
+            E = Pick Flashlight (Look at it on floor)<br>
+            ESC = Pause Game & Release Mouse
+        </p>
+    </div>
+
+    <div id="gameover">YOU DIED!</div>
 
     <script>
-        // --- Scene Setup ---
-        const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x050505, 0.15); // Horror feel ke liye dhund (fog)
+        // --- Game Variables ---
+        let scene, camera, renderer, clock;
+        let ghost = null, mixer = null;
+        let flashlight = null, flashlightDropped = null;
+        let hasFlashlight = false;
+        let isGameOver = false;
+        let isPaused = true;
 
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 01, 1000);
-        camera.position.set(0, 5, 10);
-        camera.lookAt(0, 0, 0);
+        // Player Stats
+        const player = {
+            pos: new THREE.Vector3(0, 1.6, 5), // 1.6 height is human eye level
+            rot: new THREE.Vector3(),
+            speed: 0.1
+        };
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
+        // Input Tracking
+        const keys = { w: false, a: false, s: false, d: false, e: false };
 
-        // --- Lighting ---
-        const ambientLight = new THREE.AmbientLight(0x333333); // Dim light
-        scene.add(ambientLight);
+        // Ghost Settings
+        const ghostSpeed = 0.045; 
+        const killDistance = 1.2; // Kitni kareeb aane par player marega
 
-        const redLight = new THREE.PointLight(0xff0000, 2, 50); // Horror red light
-        redLight.position.set(0, 10, 0);
-        scene.add(redLight);
+        // --- Initialize Game ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x020202, 0.12);
 
-        // --- Ground Plane ---
-        const floorGeo = new THREE.PlaneGeometry(100, 100);
-        const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
-        const floor = new THREE.Mesh(floorGeo, floorMat);
-        floor.rotation.x = -Math.PI / 2;
-        floor.receiveShadow = true;
-        scene.add(floor);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.copy(player.pos);
 
-        // --- Variables for Logic ---
-        let ghost = null;
-        let mixer = null; // Animation ke liye ਅਗਰ GLB me animations hain
-        const mouse = new THREE.Vector2();
-        const targetPosition = new THREE.Vector3();
-        const ghostSpeed = 0.05;
-        const clock = new THREE.Clock();
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
 
-        // --- Load Ghost Model ---
-        const loader = new THREE.GLTFLoader();
-        
-        // IMPORTANT: cloth_ghost.glb aapke GitHub repo me same folder me hona chahiye jahan ye html file hai
-        loader.load('cloth_ghost.glb', 
-            (gltf) => {
+            clock = new THREE.Clock();
+
+            // Lighting
+            const ambient = new THREE.AmbientLight(0x0a0a0a); // Boht andhera environment
+            scene.add(ambient);
+
+            // Ground
+            const floorGeo = new THREE.PlaneGeometry(200, 200);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Flashlight Create (Zameen par padi hui)
+            const flashGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8);
+            const flashMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            flashlightDropped = new THREE.Mesh(flashGeo, flashMat);
+            flashlightDropped.rotation.z = Math.PI / 2;
+            flashlightDropped.position.set(0, 0.05, 1); // Player ke paas zameen par
+            scene.add(flashlightDropped);
+
+            // Actual Flashlight Spotlight (Jo player ke haath me aayegi)
+            flashlight = new THREE.SpotLight(0xffffff, 5, 40, Math.PI / 5, 0.5, 1);
+            flashlight.castShadow = true;
+            flashlight.visible = false; // Pehle band hogi
+            scene.add(flashlight);
+            scene.add(flashlight.target); // Spotlight target tracker
+
+            // Load Ghost
+            const loader = new THREE.GLTFLoader();
+            loader.load('cloth_ghost.glb', (gltf) => {
                 ghost = gltf.scene;
-                ghost.scale.set(1, 1, 1); // Zarurat ke mutabiq scale adjust karein
-                ghost.position.set(0, 0, 0);
+                ghost.position.set(0, 0, -15); // Ghost thoda door se start hoga
+                ghost.scale.set(1.2, 1.2, 1.2);
                 
-                // Shadows enable karna ghost par
                 ghost.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                    }
+                    if (child.isMesh) child.castShadow = true;
                 });
-
                 scene.add(ghost);
-                
-                // Hide loading text
-                document.getElementById('loading').style.display = 'none';
 
-                // Agar model me build-in animations hain (jaise floating ya flying)
                 if (gltf.animations && gltf.animations.length > 0) {
                     mixer = new THREE.AnimationMixer(ghost);
-                    const action = mixer.clipAction(gltf.animations[0]);
-                    action.play();
+                    mixer.clipAction(gltf.animations[0]).play();
                 }
-            },
-            (xhr) => {
-                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-            },
-            (error) => {
-                console.error('An error happened loading the ghost model:', error);
-                document.getElementById('loading').innerText = 'Failed to load cloth_ghost.glb';
+                document.getElementById('loading').style.display = 'none';
+            }, undefined, (err) => {
+                console.error(err);
+                document.getElementById('loading').innerText = "Model load nahi hua! Check repository.";
+            });
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', (e) => handleKeys(e, true));
+            document.addEventListener('keyup', (e) => handleKeys(e, false));
+            document.addEventListener('mousemove', onMouseMove);
+
+            // Pointer Lock (Mouse hide/show logic)
+            const inst = document.getElementById('instructions');
+            inst.addEventListener('click', () => {
+                renderer.domElement.requestPointerLock();
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                if (document.pointerLockElement === renderer.domElement) {
+                    inst.style.display = 'none';
+                    isPaused = false;
+                } else {
+                    inst.style.display = 'block';
+                    isPaused = true;
+                }
+            });
+
+            animate();
+        }
+
+        // --- Controls Handling ---
+        function handleKeys(e, isDown) {
+            const key = e.key.toLowerCase();
+            if (key === 'w') keys.w = isDown;
+            if (key === 'a') keys.a = isDown;
+            if (key === 's') keys.s = isDown;
+            if (key === 'd') keys.d = isDown;
+            if (key === 'e' && isDown && !hasFlashlight) {
+                // Check if close enough to flashlight on ground
+                let dist = player.pos.distanceTo(flashlightDropped.position);
+                if (dist < 3) {
+                    hasFlashlight = true;
+                    flashlight.visible = true;
+                    scene.remove(flashlightDropped);
+                    document.getElementById('flashlight-status').innerText = "ON (Haath me hai)";
+                    document.getElementById('flashlight-status').style.color = "lightgreen";
+                }
             }
-        );
+        }
 
-        // --- Mouse Movement Tracking ---
-        window.addEventListener('mousemove', (event) => {
-            // Mouse coords ko 3D space (Normalized Device Coordinates) me convert karna
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        function onMouseMove(e) {
+            if (isPaused || isGameOver) return;
+            // Mouse ki movement se rotation adjust karna
+            player.rot.y -= e.movementX * 0.002;
+            player.rot.x -= e.movementY * 0.002;
+            // Limit looking up/down
+            player.rot.x = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, player.rot.x));
+        }
 
-            // Ground plane par target position calculate karna jahan mouse point kar raha hai
-            targetPosition.set(mouse.x * 15, 0, -mouse.y * 15); // Adjust multipliers for sensitivity
-        });
-
-        // --- Window Resize handling ---
-        window.addEventListener('resize', () => {
+        function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+        }
 
-        // --- Game Loop (Animation) ---
+        // --- Game Loop ---
         function animate() {
             requestAnimationFrame(animate);
+            if (isPaused || isGameOver) return;
 
             const delta = clock.getDelta();
             if (mixer) mixer.update(delta);
 
-            if (ghost) {
-                // Ghost dheere dheere target (mouse) ki taraf move karega (Interpolation/Lerp)
-                ghost.position.x += (targetPosition.x - ghost.position.x) * ghostSpeed;
-                ghost.position.z += (targetPosition.z - ghost.position.z) * ghostSpeed;
+            // 1. Player Movement Logic (WASD relative to camera facing direction)
+            const changeX = Math.sin(player.rot.y);
+            const changeZ = Math.cos(player.rot.y);
 
-                // Ghost ko target ki taraf face karwana (Smooth rotation)
-                const lookTarget = new THREE.Vector3(targetPosition.x, ghost.position.y, targetPosition.z);
-                ghost.lookAt(lookTarget);
-                
-                // Floating effect dena ghost ko thoda upar niche move karke
-                ghost.position.y = 1 + Math.sin(clock.getElapsedTime() * 2) * 0.3;
-                
-                // Red light ghost ke upar follow karegi
-                redLight.position.set(ghost.position.x, ghost.position.y + 3, ghost.position.z);
+            if (keys.w) { player.pos.x -= changeX * player.speed; player.pos.z -= changeZ * player.speed; }
+            if (keys.s) { player.pos.x += changeX * player.speed; player.pos.z += changeZ * player.speed; }
+            if (keys.a) { player.pos.x -= changeZ * player.speed; player.pos.z += changeX * player.speed; }
+            if (keys.d) { player.pos.x += changeZ * player.speed; player.pos.z -= changeX * player.speed; }
+
+            // Camera Update
+            camera.position.copy(player.pos);
+            camera.rotation.set(0,0,0);
+            camera.rotation.y = player.rot.y;
+            camera.rotation.x = player.rot.x;
+
+            // 2. Flashlight Position Sync (Aggr utha li hai)
+            if (hasFlashlight) {
+                flashlight.position.copy(camera.position);
+                // Flashlight ka rukh camera ke direction me karna
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                flashlight.target.position.copy(camera.position).add(forward);
+            }
+
+            // 3. Ghost AI (Chase and Kill Logic)
+            if (ghost) {
+                // Ghost target direction towards player
+                const dir = new THREE.Vector3().subVectors(player.pos, ghost.position);
+                dir.y = 0; // Ghost ko zameen par rakhne k liye
+                dir.normalize();
+
+                // Ghost moving towards player
+                ghost.position.addScaledVector(dir, ghostSpeed);
+                ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
+
+                // Ghost Hovering/Floating animation
+                ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2.5) * 0.2;
+
+                // Kill detection (Kareeb aane pe Game Over)
+                let distToPlayer = player.pos.distanceTo(ghost.position);
+                if (distToPlayer < killDistance) {
+                    isGameOver = true;
+                    document.getElementById('gameover').style.display = 'block';
+                    document.exitPointerLock();
+                }
             }
 
             renderer.render(scene, camera);
         }
 
-        animate();
+        // Run Game
+        init();
     </script>
 </body>
 </html>
