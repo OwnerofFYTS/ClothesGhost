@@ -1,81 +1,163 @@
-
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fast your typing speed</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghost Pursuit Game</title>
     <style>
-        body { 
-            background-color: black; 
-            font-family: 'Segoe UI', Arial; 
-            color: white; 
-            margin: 0; 
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            text-align: center; 
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: sans-serif;
         }
-        nav { 
-            display: flex; 
-            flex-direction: column; 
-            position: fixed; 
-            left: 20px; 
-            top: 50%; 
-            transform: translateY(-50%);
-            text-align: left; 
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #ff3333;
+            text-shadow: 0 0 5px #000;
+            font-size: 24px;
+            pointer-events: none;
+            user-select: none;
         }
-        nav a { 
-            margin: 10px 0; 
-            color: #ff4757; 
-            text-decoration: none; 
-            font-weight: bold; 
-            font-size: 18px;
-            transition: 0.3s;
-        }
-        nav a:hover { color: white; }
-        
-        .hero h1 { 
-            color: #3498db; 
-            font-size: 60px; 
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-        .hero p { 
-            color: #2ecc71; 
-            font-size: 24px; 
-            margin-bottom: 30px;
-        }
-        .start-btn {
-            padding: 15px 40px; 
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
             font-size: 20px;
-            cursor: pointer; 
-            background: #2ecc71; 
-            color: white; 
-            border: none; 
-            border-radius: 50px;
-            font-weight: bold;
-            transition: 0.3s;
-            text-decoration: none;
-        }
-        .start-btn:hover {
-            background: #27ae60;
-            box-shadow: 0 0 20px rgba(46, 204, 113, 0.4);
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
-    <nav>
-        <a href="index.html">Home</a>
-        <a href="about.html">Typing Practice</a>
-    </nav>
 
-    <div class="hero">
-        <h1>Welcome to Fast Your Speed</h1>
-        <p>Master the keyboard and boost your WPM</p>
-        <br>
-        <a href="about.html" class="start-btn">Get Started</a>
-    </div>
+    <div id="ui">RUN AWAY FROM THE GHOST!</div>
+    <div id="loading">Loading Ghost...</div>
+
+    <script>
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.15); // Horror feel ke liye dhund (fog)
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 01, 1000);
+        camera.position.set(0, 5, 10);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0x333333); // Dim light
+        scene.add(ambientLight);
+
+        const redLight = new THREE.PointLight(0xff0000, 2, 50); // Horror red light
+        redLight.position.set(0, 10, 0);
+        scene.add(redLight);
+
+        // --- Ground Plane ---
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // --- Variables for Logic ---
+        let ghost = null;
+        let mixer = null; // Animation ke liye ਅਗਰ GLB me animations hain
+        const mouse = new THREE.Vector2();
+        const targetPosition = new THREE.Vector3();
+        const ghostSpeed = 0.05;
+        const clock = new THREE.Clock();
+
+        // --- Load Ghost Model ---
+        const loader = new THREE.GLTFLoader();
+        
+        // IMPORTANT: cloth_ghost.glb aapke GitHub repo me same folder me hona chahiye jahan ye html file hai
+        loader.load('cloth_ghost.glb', 
+            (gltf) => {
+                ghost = gltf.scene;
+                ghost.scale.set(1, 1, 1); // Zarurat ke mutabiq scale adjust karein
+                ghost.position.set(0, 0, 0);
+                
+                // Shadows enable karna ghost par
+                ghost.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                    }
+                });
+
+                scene.add(ghost);
+                
+                // Hide loading text
+                document.getElementById('loading').style.display = 'none';
+
+                // Agar model me build-in animations hain (jaise floating ya flying)
+                if (gltf.animations && gltf.animations.length > 0) {
+                    mixer = new THREE.AnimationMixer(ghost);
+                    const action = mixer.clipAction(gltf.animations[0]);
+                    action.play();
+                }
+            },
+            (xhr) => {
+                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
+            (error) => {
+                console.error('An error happened loading the ghost model:', error);
+                document.getElementById('loading').innerText = 'Failed to load cloth_ghost.glb';
+            }
+        );
+
+        // --- Mouse Movement Tracking ---
+        window.addEventListener('mousemove', (event) => {
+            // Mouse coords ko 3D space (Normalized Device Coordinates) me convert karna
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Ground plane par target position calculate karna jahan mouse point kar raha hai
+            targetPosition.set(mouse.x * 15, 0, -mouse.y * 15); // Adjust multipliers for sensitivity
+        });
+
+        // --- Window Resize handling ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Game Loop (Animation) ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            if (mixer) mixer.update(delta);
+
+            if (ghost) {
+                // Ghost dheere dheere target (mouse) ki taraf move karega (Interpolation/Lerp)
+                ghost.position.x += (targetPosition.x - ghost.position.x) * ghostSpeed;
+                ghost.position.z += (targetPosition.z - ghost.position.z) * ghostSpeed;
+
+                // Ghost ko target ki taraf face karwana (Smooth rotation)
+                const lookTarget = new THREE.Vector3(targetPosition.x, ghost.position.y, targetPosition.z);
+                ghost.lookAt(lookTarget);
+                
+                // Floating effect dena ghost ko thoda upar niche move karke
+                ghost.position.y = 1 + Math.sin(clock.getElapsedTime() * 2) * 0.3;
+                
+                // Red light ghost ke upar follow karegi
+                redLight.position.set(ghost.position.x, ghost.position.y + 3, ghost.position.z);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
 </body>
 </html>
