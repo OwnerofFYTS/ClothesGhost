@@ -34,7 +34,7 @@
         #gameover {
             top: 50%; left: 50%; transform: translate(-50%, -50%);
             font-size: 48px; color: #ff0000; display: none; font-weight: bold;
-            text-shadow: 0 0 10px #000; z-index: 10;
+            text-shadow: 0 0 10px #000; z-index: 12;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -49,7 +49,7 @@
     
     <div id="instructions">
         <h2>GHOST PURSUIT</h2>
-        <p style="color: #ff3333;">CLICK HERE TO START</p>
+        <p style="color: #ff3333; font-weight: bold;">CLICK HERE TO START</p>
         <p style="font-size: 16px; color: #aaa; text-align: left; line-height: 1.6;">
             • <b>WASD</b> = Move Around<br>
             • <b>Mouse</b> = Look Around (Look down at your feet!)<br>
@@ -132,9 +132,7 @@
             loader.load('cloth_ghost.glb', (gltf) => {
                 ghost = gltf.scene;
                 ghost.position.set(0, 0, -12); 
-                
-                // --- GHOST SIZE REDUCED HERE ---
-                ghost.scale.set(0.85, 0.85, 0.85); // Pehle 1.2 tha, ab chota kar diya hai
+                ghost.scale.set(0.85, 0.85, 0.85); 
                 
                 ghost.traverse((child) => {
                     if (child.isMesh) child.castShadow = true;
@@ -160,10 +158,11 @@
             // Pointer Lock
             const inst = document.getElementById('instructions');
             inst.addEventListener('click', () => {
-                renderer.domElement.requestPointerLock();
+                if(!isGameOver) renderer.domElement.requestPointerLock();
             });
 
             document.addEventListener('pointerlockchange', () => {
+                if (isGameOver) return; // Game over par lock change ignore karein
                 if (document.pointerLockElement === renderer.domElement) {
                     inst.style.display = 'none';
                     isPaused = false;
@@ -177,6 +176,7 @@
         }
 
         function handleKeys(e, isDown) {
+            if (isGameOver) return;
             const key = e.key.toLowerCase();
             if (key === 'w') keys.w = isDown;
             if (key === 'a') keys.a = isDown;
@@ -199,7 +199,6 @@
             if (isPaused || isGameOver) return;
             player.rot.y -= e.movementX * 0.0025;
             player.rot.x -= e.movementY * 0.0025;
-            // Up/Down looking limits
             player.rot.x = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, player.rot.x));
         }
 
@@ -209,9 +208,35 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        // --- NEW FIXED TRIGGER FOR DEATH SCREEN ---
+        function triggerGameOver() {
+            isGameOver = true;
+            document.exitPointerLock();
+            
+            // UI elements reset
+            document.getElementById('gameover').style.display = 'block';
+            document.getElementById('instructions').style.display = 'none'; // Peche wala instruction box chupayein
+
+            // Camera ko smooth aur seedha karne ki settings
+            player.rot.set(0, player.rot.y, 0); // X aur Z angles zero (No tilt)
+            camera.rotation.set(0, player.rot.y, 0);
+            
+            // Camera ko exact ghost ki taraf lookat karwadein taake player seedha ghost ko dekhe
+            if (ghost) {
+                camera.lookAt(ghost.position.x, ghost.position.y + 1, ghost.position.z);
+            }
+        }
+
         function animate() {
             requestAnimationFrame(animate);
-            if (isPaused || isGameOver) return;
+            
+            // Game over screen par scene render hota rahega, bas logic freeze hogi
+            if (isGameOver) {
+                renderer.render(scene, camera);
+                return; 
+            }
+            
+            if (isPaused) return;
 
             const delta = clock.getDelta();
             if (mixer) mixer.update(delta);
@@ -225,11 +250,11 @@
             if (keys.a) { player.pos.x -= changeZ * player.speed; player.pos.z += changeX * player.speed; }
             if (keys.d) { player.pos.x += changeZ * player.speed; player.pos.z -= changeX * player.speed; }
 
-            // --- FIXED CAMERA ROTATION (SCREEN TILT FIX) ---
+            // Apply camera rotations safely
             camera.position.copy(player.pos);
-            camera.rotation.set(0, 0, 0); // Pehle reset rotation taake tilt khatam ho
+            camera.rotation.set(0, 0, 0); 
             camera.rotation.y = player.rot.y;
-            camera.rotation.x = player.rot.x; // Sirf pitch aur yaw apply hogi, roll (tilt) nahi hoga
+            camera.rotation.x = player.rot.x; 
 
             // Flashlight Sync
             if (hasFlashlight) {
@@ -248,12 +273,10 @@
                 ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
                 ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2) * 0.12;
 
-                // Kill Check
+                // Kill Distance check
                 let distToPlayer = player.pos.distanceTo(ghost.position);
                 if (distToPlayer < killDistance) {
-                    isGameOver = true;
-                    document.getElementById('gameover').style.display = 'block';
-                    document.exitPointerLock();
+                    triggerGameOver();
                 }
             }
 
