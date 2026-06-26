@@ -49,7 +49,7 @@
     
     <div id="instructions">
         <h2>GHOST PURSUIT</h2>
-        <p style="color: #ff3333; animation: blink 1s infinite;">CLICK HERE TO START</p>
+        <p style="color: #ff3333;">CLICK HERE TO START</p>
         <p style="font-size: 16px; color: #aaa; text-align: left; line-height: 1.6;">
             • <b>WASD</b> = Move Around<br>
             • <b>Mouse</b> = Look Around (Look down at your feet!)<br>
@@ -76,11 +76,10 @@
 
         const keys = { w: false, a: false, s: false, d: false, e: false };
         const ghostSpeed = 0.04; 
-        const killDistance = 1.3; 
+        const killDistance = 1.2; 
 
         function init() {
             scene = new THREE.Scene();
-            // Fog thoda kam kiya taake bilkul andhera na lage
             scene.fog = new THREE.FogExp2(0x0a0505, 0.08); 
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -93,17 +92,15 @@
 
             clock = new THREE.Clock();
 
-            // --- LIGHTING FIX ---
-            // Thodi roshni ambient me di hai (Dark Red/Blue Mix horror vibe ke liye)
+            // Lighting
             const ambient = new THREE.AmbientLight(0x221111); 
             scene.add(ambient);
 
-            // Aik halki si overhead light pure map par taake zameen aur cheezein visible hon
             const overheadLight = new THREE.DirectionalLight(0x334455, 0.5);
             overheadLight.position.set(0, 20, 0);
             scene.add(overheadLight);
 
-            // Ground (Texture color thoda light kiya taake andhere me dikhe)
+            // Ground
             const floorGeo = new THREE.PlaneGeometry(200, 200);
             const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
             const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -111,21 +108,19 @@
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // --- FLASHLIGHT OBJECT DESIGN ---
-            // Flashlight ka size bada kiya aur color metallic silver kiya
+            // Flashlight on Ground
             const flashGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 12);
             const flashMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
             flashlightDropped = new THREE.Mesh(flashGeo, flashMat);
             flashlightDropped.rotation.z = Math.PI / 2;
-            flashlightDropped.position.set(0, 0.1, 2); // Player ke bilkul agay zameen par
+            flashlightDropped.position.set(0, 0.1, 2); 
             scene.add(flashlightDropped);
 
-            // Flashlight ke upar aik Chhota Glowing Green Light indicator (Taake andhere me chamke)
             flashlightGlow = new THREE.PointLight(0x00ff00, 2, 3);
             flashlightGlow.position.copy(flashlightDropped.position);
             scene.add(flashlightGlow);
 
-            // Actual Flashlight Spotlight (Jo player haath me pakdega)
+            // Spotlight Player Hand
             flashlight = new THREE.SpotLight(0xffffff, 8, 50, Math.PI / 4, 0.5, 1);
             flashlight.castShadow = true;
             flashlight.visible = false; 
@@ -136,8 +131,10 @@
             const loader = new THREE.GLTFLoader();
             loader.load('cloth_ghost.glb', (gltf) => {
                 ghost = gltf.scene;
-                ghost.position.set(0, 0, -12); // Shuru me ghost thoda door hoga
-                ghost.scale.set(1.2, 1.2, 1.2);
+                ghost.position.set(0, 0, -12); 
+                
+                // --- GHOST SIZE REDUCED HERE ---
+                ghost.scale.set(0.85, 0.85, 0.85); // Pehle 1.2 tha, ab chota kar diya hai
                 
                 ghost.traverse((child) => {
                     if (child.isMesh) child.castShadow = true;
@@ -160,7 +157,7 @@
             document.addEventListener('keyup', (e) => handleKeys(e, false));
             document.addEventListener('mousemove', onMouseMove);
 
-            // Pointer Lock Setup
+            // Pointer Lock
             const inst = document.getElementById('instructions');
             inst.addEventListener('click', () => {
                 renderer.domElement.requestPointerLock();
@@ -187,7 +184,6 @@
             if (key === 'd') keys.d = isDown;
             if (key === 'e' && isDown && !hasFlashlight) {
                 let dist = player.pos.distanceTo(flashlightDropped.position);
-                // Agar player flashlight ke 3 units ke daire me hai
                 if (dist < 3) {
                     hasFlashlight = true;
                     flashlight.visible = true;
@@ -203,6 +199,7 @@
             if (isPaused || isGameOver) return;
             player.rot.y -= e.movementX * 0.0025;
             player.rot.x -= e.movementY * 0.0025;
+            // Up/Down looking limits
             player.rot.x = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, player.rot.x));
         }
 
@@ -228,20 +225,20 @@
             if (keys.a) { player.pos.x -= changeZ * player.speed; player.pos.z += changeX * player.speed; }
             if (keys.d) { player.pos.x += changeZ * player.speed; player.pos.z -= changeX * player.speed; }
 
-            // Camera View update
+            // --- FIXED CAMERA ROTATION (SCREEN TILT FIX) ---
             camera.position.copy(player.pos);
-            camera.rotation.set(0,0,0);
+            camera.rotation.set(0, 0, 0); // Pehle reset rotation taake tilt khatam ho
             camera.rotation.y = player.rot.y;
-            camera.rotation.x = player.rot.x;
+            camera.rotation.x = player.rot.x; // Sirf pitch aur yaw apply hogi, roll (tilt) nahi hoga
 
-            // Flashlight Attach to Camera
+            // Flashlight Sync
             if (hasFlashlight) {
                 flashlight.position.copy(camera.position);
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                 flashlight.target.position.copy(camera.position).add(forward);
             }
 
-            // Ghost Movement & Logic
+            // Ghost AI
             if (ghost) {
                 const dir = new THREE.Vector3().subVectors(player.pos, ghost.position);
                 dir.y = 0; 
@@ -249,7 +246,7 @@
 
                 ghost.position.addScaledVector(dir, ghostSpeed);
                 ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
-                ghost.position.y = 0.6 + Math.sin(clock.getElapsedTime() * 2) * 0.15;
+                ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2) * 0.12;
 
                 // Kill Check
                 let distToPlayer = player.pos.distanceTo(ghost.position);
