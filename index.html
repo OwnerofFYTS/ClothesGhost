@@ -22,17 +22,19 @@
         #ui {
             top: 20px; left: 20px; font-size: 18px; text-align: left;
             text-shadow: 2px 2px 4px #000;
+            z-index: 10;
         }
         #instructions {
             top: 50%; left: 50%; transform: translate(-50%, -50%);
-            font-size: 24px; background: rgba(0,0,0,0.8); padding: 20px;
+            font-size: 24px; background: rgba(0,0,0,0.85); padding: 30px;
             border: 2px solid #ff3333; pointer-events: auto; cursor: pointer;
+            z-index: 10; border-radius: 8px;
         }
-        #loading { top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; }
+        #loading { top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; z-index: 10; }
         #gameover {
             top: 50%; left: 50%; transform: translate(-50%, -50%);
             font-size: 48px; color: #ff0000; display: none; font-weight: bold;
-            text-shadow: 0 0 10px #000;
+            text-shadow: 0 0 10px #000; z-index: 10;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -42,48 +44,44 @@
 
     <div id="loading">Loading Ghost Model...</div>
     <div id="ui">
-        Flashlight: <span id="flashlight-status" style="color:red;">Zameen Par Hai (Press 'E' to Pick)</span>
+        Flashlight: <span id="flashlight-status" style="color:#ff3333; font-weight:bold;">ZAMEEN PAR HAI (Look down & Press 'E' to Pick)</span>
     </div>
     
     <div id="instructions">
-        <h2>HORROR ESCAPE</h2>
-        <p>Click here to Play</p>
-        <p style="font-size: 16px; color: #aaa;">
-            WASD = Move | Mouse = Look Around<br>
-            E = Pick Flashlight (Look at it on floor)<br>
-            ESC = Pause Game & Release Mouse
+        <h2>GHOST PURSUIT</h2>
+        <p style="color: #ff3333; animation: blink 1s infinite;">CLICK HERE TO START</p>
+        <p style="font-size: 16px; color: #aaa; text-align: left; line-height: 1.6;">
+            • <b>WASD</b> = Move Around<br>
+            • <b>Mouse</b> = Look Around (Look down at your feet!)<br>
+            • <b>E</b> = Pick Flashlight (When close to it)<br>
+            • <b>ESC</b> = Pause Game & Release Mouse
         </p>
     </div>
 
     <div id="gameover">YOU DIED!</div>
 
     <script>
-        // --- Game Variables ---
         let scene, camera, renderer, clock;
         let ghost = null, mixer = null;
-        let flashlight = null, flashlightDropped = null;
+        let flashlight = null, flashlightDropped = null, flashlightGlow = null;
         let hasFlashlight = false;
         let isGameOver = false;
         let isPaused = true;
 
-        // Player Stats
         const player = {
-            pos: new THREE.Vector3(0, 1.6, 5), // 1.6 height is human eye level
+            pos: new THREE.Vector3(0, 1.6, 5), 
             rot: new THREE.Vector3(),
             speed: 0.1
         };
 
-        // Input Tracking
         const keys = { w: false, a: false, s: false, d: false, e: false };
+        const ghostSpeed = 0.04; 
+        const killDistance = 1.3; 
 
-        // Ghost Settings
-        const ghostSpeed = 0.045; 
-        const killDistance = 1.2; // Kitni kareeb aane par player marega
-
-        // --- Initialize Game ---
         function init() {
             scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x020202, 0.12);
+            // Fog thoda kam kiya taake bilkul andhera na lage
+            scene.fog = new THREE.FogExp2(0x0a0505, 0.08); 
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.copy(player.pos);
@@ -95,38 +93,50 @@
 
             clock = new THREE.Clock();
 
-            // Lighting
-            const ambient = new THREE.AmbientLight(0x0a0a0a); // Boht andhera environment
+            // --- LIGHTING FIX ---
+            // Thodi roshni ambient me di hai (Dark Red/Blue Mix horror vibe ke liye)
+            const ambient = new THREE.AmbientLight(0x221111); 
             scene.add(ambient);
 
-            // Ground
+            // Aik halki si overhead light pure map par taake zameen aur cheezein visible hon
+            const overheadLight = new THREE.DirectionalLight(0x334455, 0.5);
+            overheadLight.position.set(0, 20, 0);
+            scene.add(overheadLight);
+
+            // Ground (Texture color thoda light kiya taake andhere me dikhe)
             const floorGeo = new THREE.PlaneGeometry(200, 200);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
             const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // Flashlight Create (Zameen par padi hui)
-            const flashGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8);
-            const flashMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            // --- FLASHLIGHT OBJECT DESIGN ---
+            // Flashlight ka size bada kiya aur color metallic silver kiya
+            const flashGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 12);
+            const flashMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
             flashlightDropped = new THREE.Mesh(flashGeo, flashMat);
             flashlightDropped.rotation.z = Math.PI / 2;
-            flashlightDropped.position.set(0, 0.05, 1); // Player ke paas zameen par
+            flashlightDropped.position.set(0, 0.1, 2); // Player ke bilkul agay zameen par
             scene.add(flashlightDropped);
 
-            // Actual Flashlight Spotlight (Jo player ke haath me aayegi)
-            flashlight = new THREE.SpotLight(0xffffff, 5, 40, Math.PI / 5, 0.5, 1);
+            // Flashlight ke upar aik Chhota Glowing Green Light indicator (Taake andhere me chamke)
+            flashlightGlow = new THREE.PointLight(0x00ff00, 2, 3);
+            flashlightGlow.position.copy(flashlightDropped.position);
+            scene.add(flashlightGlow);
+
+            // Actual Flashlight Spotlight (Jo player haath me pakdega)
+            flashlight = new THREE.SpotLight(0xffffff, 8, 50, Math.PI / 4, 0.5, 1);
             flashlight.castShadow = true;
-            flashlight.visible = false; // Pehle band hogi
+            flashlight.visible = false; 
             scene.add(flashlight);
-            scene.add(flashlight.target); // Spotlight target tracker
+            scene.add(flashlight.target); 
 
             // Load Ghost
             const loader = new THREE.GLTFLoader();
             loader.load('cloth_ghost.glb', (gltf) => {
                 ghost = gltf.scene;
-                ghost.position.set(0, 0, -15); // Ghost thoda door se start hoga
+                ghost.position.set(0, 0, -12); // Shuru me ghost thoda door hoga
                 ghost.scale.set(1.2, 1.2, 1.2);
                 
                 ghost.traverse((child) => {
@@ -141,7 +151,7 @@
                 document.getElementById('loading').style.display = 'none';
             }, undefined, (err) => {
                 console.error(err);
-                document.getElementById('loading').innerText = "Model load nahi hua! Check repository.";
+                document.getElementById('loading').innerText = "Model load nahi hua! Check path.";
             });
 
             // Event Listeners
@@ -150,7 +160,7 @@
             document.addEventListener('keyup', (e) => handleKeys(e, false));
             document.addEventListener('mousemove', onMouseMove);
 
-            // Pointer Lock (Mouse hide/show logic)
+            // Pointer Lock Setup
             const inst = document.getElementById('instructions');
             inst.addEventListener('click', () => {
                 renderer.domElement.requestPointerLock();
@@ -169,7 +179,6 @@
             animate();
         }
 
-        // --- Controls Handling ---
         function handleKeys(e, isDown) {
             const key = e.key.toLowerCase();
             if (key === 'w') keys.w = isDown;
@@ -177,24 +186,23 @@
             if (key === 's') keys.s = isDown;
             if (key === 'd') keys.d = isDown;
             if (key === 'e' && isDown && !hasFlashlight) {
-                // Check if close enough to flashlight on ground
                 let dist = player.pos.distanceTo(flashlightDropped.position);
+                // Agar player flashlight ke 3 units ke daire me hai
                 if (dist < 3) {
                     hasFlashlight = true;
                     flashlight.visible = true;
                     scene.remove(flashlightDropped);
-                    document.getElementById('flashlight-status').innerText = "ON (Haath me hai)";
-                    document.getElementById('flashlight-status').style.color = "lightgreen";
+                    scene.remove(flashlightGlow);
+                    document.getElementById('flashlight-status').innerText = "UTHA LI HAI (Active)";
+                    document.getElementById('flashlight-status').style.color = "#00ff00";
                 }
             }
         }
 
         function onMouseMove(e) {
             if (isPaused || isGameOver) return;
-            // Mouse ki movement se rotation adjust karna
-            player.rot.y -= e.movementX * 0.002;
-            player.rot.x -= e.movementY * 0.002;
-            // Limit looking up/down
+            player.rot.y -= e.movementX * 0.0025;
+            player.rot.x -= e.movementY * 0.0025;
             player.rot.x = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, player.rot.x));
         }
 
@@ -204,7 +212,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- Game Loop ---
         function animate() {
             requestAnimationFrame(animate);
             if (isPaused || isGameOver) return;
@@ -212,7 +219,7 @@
             const delta = clock.getDelta();
             if (mixer) mixer.update(delta);
 
-            // 1. Player Movement Logic (WASD relative to camera facing direction)
+            // Player Movement
             const changeX = Math.sin(player.rot.y);
             const changeZ = Math.cos(player.rot.y);
 
@@ -221,35 +228,30 @@
             if (keys.a) { player.pos.x -= changeZ * player.speed; player.pos.z += changeX * player.speed; }
             if (keys.d) { player.pos.x += changeZ * player.speed; player.pos.z -= changeX * player.speed; }
 
-            // Camera Update
+            // Camera View update
             camera.position.copy(player.pos);
             camera.rotation.set(0,0,0);
             camera.rotation.y = player.rot.y;
             camera.rotation.x = player.rot.x;
 
-            // 2. Flashlight Position Sync (Aggr utha li hai)
+            // Flashlight Attach to Camera
             if (hasFlashlight) {
                 flashlight.position.copy(camera.position);
-                // Flashlight ka rukh camera ke direction me karna
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                 flashlight.target.position.copy(camera.position).add(forward);
             }
 
-            // 3. Ghost AI (Chase and Kill Logic)
+            // Ghost Movement & Logic
             if (ghost) {
-                // Ghost target direction towards player
                 const dir = new THREE.Vector3().subVectors(player.pos, ghost.position);
-                dir.y = 0; // Ghost ko zameen par rakhne k liye
+                dir.y = 0; 
                 dir.normalize();
 
-                // Ghost moving towards player
                 ghost.position.addScaledVector(dir, ghostSpeed);
                 ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
+                ghost.position.y = 0.6 + Math.sin(clock.getElapsedTime() * 2) * 0.15;
 
-                // Ghost Hovering/Floating animation
-                ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2.5) * 0.2;
-
-                // Kill detection (Kareeb aane pe Game Over)
+                // Kill Check
                 let distToPlayer = player.pos.distanceTo(ghost.position);
                 if (distToPlayer < killDistance) {
                     isGameOver = true;
@@ -261,7 +263,6 @@
             renderer.render(scene, camera);
         }
 
-        // Run Game
         init();
     </script>
 </body>
