@@ -56,7 +56,7 @@
 </head>
 <body>
 
-    <div id="loading">Loading Ghost Model...</div>
+    <div id="loading">Loading Assets...</div>
     <div id="ui">
         Flashlight: <span id="flashlight-status" style="color:#ff3333; font-weight:bold;">ZAMEEN PAR HAI (Look down & Press 'E' to Pick)</span>
     </div>
@@ -80,23 +80,32 @@
     <script>
         let scene, camera, renderer, clock;
         let ghost = null, mixer = null;
+        let house = null;
         let flashlight = null, flashlightDropped = null, flashlightGlow = null;
         let hasFlashlight = false;
         let isGameOver = false;
         let isPaused = true;
 
-        // --- PLAYER SPEED ADJUSTMENTS ---
+        // --- SPAWN INSIDE HOUSE (Position centered at 0, 1.6, 0) ---
         const player = {
-            pos: new THREE.Vector3(0, 1.6, 5), 
-            forwardSpeed: 0.11,   // Running forward (W) is fast
-            strafeSpeed: 0.035    // Moving backwards (S) or sideways (A/D) is now super slow
+            pos: new THREE.Vector3(0, 1.6, 0), 
+            forwardSpeed: 0.11,   
+            strafeSpeed: 0.035    
         };
 
         const keys = { w: false, a: false, s: false, d: false, e: false };
-        
-        // --- GHOST SPEED INCREASED ---
-        const ghostSpeed = 0.068; // Pehle 0.04 tha, ab kafi tez kiya hai
+        const ghostSpeed = 0.068; 
         const killDistance = 1.2; 
+
+        let modelsLoaded = 0;
+        const totalModels = 2; // Ghost aur House
+
+        function checkLoading() {
+            modelsLoaded++;
+            if (modelsLoaded >= totalModels) {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
 
         function init() {
             scene = new THREE.Scene();
@@ -138,11 +147,31 @@
             scene.add(flashlight);
             scene.add(flashlight.target); 
 
-            // Load Ghost
             const loader = new THREE.GLTFLoader();
+
+            // --- LOAD DUPLEX HOUSE MODEL ---
+            loader.load('duplex.glb', (gltf) => {
+                house = gltf.scene;
+                house.position.set(0, 0, 0); // Ground position level
+                house.scale.set(1, 1, 1); // Agar ghar size me chota ya bada ho toh scale change kar sakte hain
+                
+                house.traverse((child) => {
+                    if (child.isMesh) {
+                        child.receiveShadow = true;
+                        child.castShadow = true;
+                    }
+                });
+                scene.add(house);
+                checkLoading();
+            }, undefined, (err) => {
+                console.error(err);
+                document.getElementById('loading').innerText = "House Model load nahi hua! Check path.";
+            });
+
+            // --- LOAD GHOST MODEL ---
             loader.load('cloth_ghost.glb', (gltf) => {
                 ghost = gltf.scene;
-                ghost.position.set(0, 0, -12); 
+                ghost.position.set(0, 0, -6); // Spawns slightly away inside the house
                 ghost.scale.set(0.85, 0.85, 0.85); 
                 
                 ghost.traverse((child) => {
@@ -154,10 +183,10 @@
                     mixer = new THREE.AnimationMixer(ghost);
                     mixer.clipAction(gltf.animations[0]).play();
                 }
-                document.getElementById('loading').style.display = 'none';
+                checkLoading();
             }, undefined, (err) => {
                 console.error(err);
-                document.getElementById('loading').innerText = "Model load nahi hua! Check path.";
+                document.getElementById('loading').innerText = "Ghost Model load nahi hua! Check path.";
             });
 
             // Event Listeners
@@ -193,7 +222,7 @@
             const flashMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
             flashlightDropped = new THREE.Mesh(flashGeo, flashMat);
             flashlightDropped.rotation.z = Math.PI / 2;
-            flashlightDropped.position.set(0, 0.1, 2); 
+            flashlightDropped.position.set(0, 0.1, -2); // Placed inside the house in front of player
             scene.add(flashlightDropped);
 
             flashlightGlow = new THREE.PointLight(0x00ff00, 2, 3);
@@ -260,12 +289,12 @@
             document.getElementById('flashlight-status').innerText = "ZAMEEN PAR HAI (Look down & Press 'E' to Pick)";
             document.getElementById('flashlight-status').style.color = "#ff3333";
 
-            player.pos.set(0, 1.6, 5);
+            player.pos.set(0, 1.6, 0); // Reset inside house
             camera.position.copy(player.pos);
             camera.rotation.set(0, 0, 0);
 
             if (ghost) {
-                ghost.position.set(0, 0, -12);
+                ghost.position.set(0, 0, -6);
             }
 
             flashlight.visible = false;
@@ -316,7 +345,6 @@
                 dir.y = 0; 
                 dir.normalize();
 
-                // Ghost moves with the new increased speed
                 ghost.position.addScaledVector(dir, ghostSpeed);
                 ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
                 ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2) * 0.12;
