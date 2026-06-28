@@ -86,7 +86,7 @@
         let isGameOver = false;
         let isPaused = true;
 
-        // --- SPAWN INSIDE HOUSE (Position centered at 0, 1.6, 0) ---
+        // --- SPAWN INSIDE HOUSE ---
         const player = {
             pos: new THREE.Vector3(0, 1.6, 0), 
             forwardSpeed: 0.11,   
@@ -98,7 +98,7 @@
         const killDistance = 1.2; 
 
         let modelsLoaded = 0;
-        const totalModels = 2; // Ghost aur House
+        const totalModels = 2; 
 
         function checkLoading() {
             modelsLoaded++;
@@ -109,7 +109,8 @@
 
         function init() {
             scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x0a0505, 0.08); 
+            // Fog density ko thoda kam kiya taake deewariyan bilkul black na hon
+            scene.fog = new THREE.FogExp2(0x050505, 0.05); 
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.copy(player.pos);
@@ -122,38 +123,43 @@
 
             clock = new THREE.Clock();
 
-            // Lighting
-            const ambient = new THREE.AmbientLight(0x221111); 
+            // --- OPTIMIZED HORROR LIGHTING ---
+            // Halka sa blue/grey ambient light taake ghar ka layout andhere me bhi halka nazar aaye
+            const ambient = new THREE.AmbientLight(0x222530, 0.6); 
             scene.add(ambient);
 
-            const overheadLight = new THREE.DirectionalLight(0x334455, 0.5);
+            const overheadLight = new THREE.DirectionalLight(0x445566, 0.3);
             overheadLight.position.set(0, 20, 0);
             scene.add(overheadLight);
 
             // Ground
             const floorGeo = new THREE.PlaneGeometry(200, 200);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
             const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             floor.receiveShadow = true;
             scene.add(floor);
 
+            // Create Ground FL
             createGroundFlashlight();
 
-            // Spotlight Player Hand
-            flashlight = new THREE.SpotLight(0xffffff, 8, 50, Math.PI / 4, 0.5, 1);
+            // --- DETAILED FLASHLIGHT (FL) SYSTEM ---
+            // Color: Pure White, Intensity: 12, Distance: 60, Angle: Math.PI/4.5 (sharp beam)
+            flashlight = new THREE.SpotLight(0xffffff, 12, 60, Math.PI / 4.5, 0.6, 1);
             flashlight.castShadow = true;
+            flashlight.shadow.mapSize.width = 1024;
+            flashlight.shadow.mapSize.height = 1024;
             flashlight.visible = false; 
             scene.add(flashlight);
             scene.add(flashlight.target); 
 
             const loader = new THREE.GLTFLoader();
 
-            // --- LOAD DUPLEX HOUSE MODEL ---
+            // --- LOAD DUPLEX HOUSE ---
             loader.load('duplex.glb', (gltf) => {
                 house = gltf.scene;
-                house.position.set(0, 0, 0); // Ground position level
-                house.scale.set(1, 1, 1); // Agar ghar size me chota ya bada ho toh scale change kar sakte hain
+                house.position.set(0, 0, 0); 
+                house.scale.set(1, 1, 1); // Agar screen abhi bhi black ho, toh ise (0.1, 0.1, 0.1) kar ke check karein
                 
                 house.traverse((child) => {
                     if (child.isMesh) {
@@ -168,10 +174,10 @@
                 document.getElementById('loading').innerText = "House Model load nahi hua! Check path.";
             });
 
-            // --- LOAD GHOST MODEL ---
+            // --- LOAD GHOST ---
             loader.load('cloth_ghost.glb', (gltf) => {
                 ghost = gltf.scene;
-                ghost.position.set(0, 0, -6); // Spawns slightly away inside the house
+                ghost.position.set(0, 0, -6); 
                 ghost.scale.set(0.85, 0.85, 0.85); 
                 
                 ghost.traverse((child) => {
@@ -217,15 +223,19 @@
             animate();
         }
 
+        // --- GROUND FLASHLIGHT ---
         function createGroundFlashlight() {
-            const flashGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 12);
-            const flashMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
+            const flashGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.4, 12);
+            const flashMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8 });
             flashlightDropped = new THREE.Mesh(flashGeo, flashMat);
             flashlightDropped.rotation.z = Math.PI / 2;
-            flashlightDropped.position.set(0, 0.1, -2); // Placed inside the house in front of player
+            
+            // Player ke bilkul thoda sa aage zameen par drop ki hai taake aasani se dikhe
+            flashlightDropped.position.set(0, 0.1, -1.5); 
             scene.add(flashlightDropped);
 
-            flashlightGlow = new THREE.PointLight(0x00ff00, 2, 3);
+            // Flashlight ka green neon glow neon look dene ke liye
+            flashlightGlow = new THREE.PointLight(0x00ff00, 3, 4);
             flashlightGlow.position.copy(flashlightDropped.position);
             scene.add(flashlightGlow);
         }
@@ -237,6 +247,8 @@
             if (key === 'a') keys.a = isDown;
             if (key === 's') keys.s = isDown;
             if (key === 'd') keys.d = isDown;
+            
+            // Pick FL Logic
             if (key === 'e' && isDown && !hasFlashlight) {
                 let dist = camera.position.distanceTo(flashlightDropped.position);
                 if (dist < 3) {
@@ -289,7 +301,7 @@
             document.getElementById('flashlight-status').innerText = "ZAMEEN PAR HAI (Look down & Press 'E' to Pick)";
             document.getElementById('flashlight-status').style.color = "#ff3333";
 
-            player.pos.set(0, 1.6, 0); // Reset inside house
+            player.pos.set(0, 1.6, 0); 
             camera.position.copy(player.pos);
             camera.rotation.set(0, 0, 0);
 
@@ -318,14 +330,12 @@
             const delta = clock.getDelta();
             if (mixer) mixer.update(delta);
 
-            // Movement vectors
             const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
             const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
             
             forward.y = 0; forward.normalize();
             right.y = 0; right.normalize();
 
-            // WASD Movement Execution with Adjusted Speeds
             if (keys.w) player.pos.addScaledVector(forward, player.forwardSpeed);
             if (keys.s) player.pos.addScaledVector(forward, -player.strafeSpeed);
             if (keys.d) player.pos.addScaledVector(right, player.strafeSpeed);   
@@ -333,6 +343,7 @@
 
             camera.position.copy(player.pos);
 
+            // --- FL DYNAMIC MOVEMENT WITH CAMERA ---
             if (hasFlashlight) {
                 flashlight.position.copy(camera.position);
                 const flashDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -349,7 +360,6 @@
                 ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
                 ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2) * 0.12;
 
-                // Kill Distance check
                 let distToPlayer = player.pos.distanceTo(ghost.position);
                 if (distToPlayer < killDistance) {
                     triggerGameOver();
