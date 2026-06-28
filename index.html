@@ -3,118 +3,363 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Horror House Exploration</title>
+    <title>Horror Ghost Escape</title>
     <style>
-        body {
+        body, html {
             margin: 0;
+            padding: 0;
             overflow: hidden;
             background-color: #050505;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #ui, #loading, #gameover, #instructions {
+            position: absolute;
+            color: white;
+            user-select: none;
+            pointer-events: none;
+            text-align: center;
+        }
+        #ui {
+            top: 20px; left: 20px; font-size: 18px; text-align: left;
+            text-shadow: 2px 2px 4px #000;
+            z-index: 10;
         }
         #instructions {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: white;
-            font-family: sans-serif;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 12px 24px;
-            border-radius: 5px;
-            text-align: center;
-            pointer-events: none;
-            font-size: 16px;
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 24px; background: rgba(0,0,0,0.85); padding: 30px;
+            border: 2px solid #ff3333; pointer-events: auto; cursor: pointer;
+            z-index: 10; border-radius: 8px;
+        }
+        #loading { top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; z-index: 10; }
+        
+        #gameover {
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+            display: none; z-index: 12; pointer-events: auto;
+        }
+        #gameover h1 {
+            font-size: 56px; color: #ff0000; margin: 0 0 20px 0; font-weight: bold;
+            text-shadow: 0 0 15px #000;
+        }
+        #btn-retry {
+            font-family: 'Courier New', Courier, monospace;
+            background: #ff3333; color: white; border: none;
+            padding: 12px 30px; font-size: 20px; font-weight: bold;
+            cursor: pointer; border-radius: 4px; box-shadow: 0 0 10px rgba(255,0,0,0.5);
+            transition: 0.2s;
+        }
+        #btn-retry:hover {
+            background: #ff1111; transform: scale(1.05);
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 
-    <div id="instructions">Screen par Click karein aur WASD se ghar ke andar chalein</div>
+    <div id="loading">Loading Assets...</div>
+    <div id="ui">
+        Flashlight: <span id="flashlight-status" style="color:#ff3333; font-weight:bold;">ZAMEEN PAR HAI (Look down & Press 'E' to Pick)</span>
+    </div>
+    
+    <div id="instructions">
+        <h2>GHOST PURSUIT</h2>
+        <p style="color: #ff3333; font-weight: bold;">CLICK HERE TO START</p>
+        <p style="font-size: 16px; color: #aaa; text-align: left; line-height: 1.6;">
+            • <b>WASD</b> = Move Around (S/A/D are very slow!)<br>
+            • <b>Mouse</b> = Look Around (Look down at your feet!)<br>
+            • <b>E</b> = Pick Flashlight (When close to it)<br>
+            • <b>ESC</b> = Pause Game & Release Mouse
+        </p>
+    </div>
 
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    <div id="gameover">
+        <h1>YOU DIED!</h1>
+        <button id="btn-retry">TRY AGAIN</button>
+    </div>
+
+    <script>
+        let scene, camera, renderer, clock;
+        let ghost = null, mixer = null;
+        let house = null;
+        let flashlight = null, flashlightDropped = null, flashlightGlow = null;
+        let hasFlashlight = false;
+        let isGameOver = false;
+        let isPaused = true;
+
+        // --- SPAWN INSIDE HOUSE (Position centered at 0, 1.6, 0) ---
+        const player = {
+            pos: new THREE.Vector3(0, 1.6, 0), 
+            forwardSpeed: 0.11,   
+            strafeSpeed: 0.035    
+        };
+
+        const keys = { w: false, a: false, s: false, d: false, e: false };
+        const ghostSpeed = 0.068; 
+        const killDistance = 1.2; 
+
+        let modelsLoaded = 0;
+        const totalModels = 2; // Ghost aur House
+
+        function checkLoading() {
+            modelsLoaded++;
+            if (modelsLoaded >= totalModels) {
+                document.getElementById('loading').style.display = 'none';
             }
         }
-    </script>
 
-    <script type="module">
-        import * as THREE from 'three';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x0a0505, 0.08); 
 
-        // 1. Scene, Camera, aur Renderer Setup
-        const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x050505, 0.03); 
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.copy(player.pos);
+            camera.rotation.order = 'YXZ';
 
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 2, 15); 
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
+            clock = new THREE.Clock();
 
-        // 2. WASD Movement Controls
-        const controls = new PointerLockControls(camera, document.body);
-        document.body.addEventListener('click', () => { controls.lock(); });
+            // Lighting
+            const ambient = new THREE.AmbientLight(0x221111); 
+            scene.add(ambient);
 
-        const moveSpeed = 0.2; 
-        const keys = { w: false, a: false, s: false, d: false };
+            const overheadLight = new THREE.DirectionalLight(0x334455, 0.5);
+            overheadLight.position.set(0, 20, 0);
+            scene.add(overheadLight);
 
-        window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = true; });
-        window.addEventListener('keyup', (e) => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = false; });
+            // Ground
+            const floorGeo = new THREE.PlaneGeometry(200, 200);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
 
-        // 3. Lighting (Horror Flashlight)
-        const ambientLight = new THREE.AmbientLight(0x111122, 0.4); 
-        scene.add(ambientLight);
+            createGroundFlashlight();
 
-        const flashLight = new THREE.SpotLight(0xffffff, 8, 40, Math.PI / 5, 0.5, 1);
-        scene.add(flashLight);
-        scene.add(flashLight.target);
+            // Spotlight Player Hand
+            flashlight = new THREE.SpotLight(0xffffff, 8, 50, Math.PI / 4, 0.5, 1);
+            flashlight.castShadow = true;
+            flashlight.visible = false; 
+            scene.add(flashlight);
+            scene.add(flashlight.target); 
 
-        // 4. Load Haunted House
-        const loader = new GLTFLoader();
-        loader.load(
-            'haunted_house.glb', 
-            function (gltf) {
-                const house = gltf.scene;
-                house.position.set(0, 0, 0);
+            const loader = new THREE.GLTFLoader();
+
+            // --- LOAD DUPLEX HOUSE MODEL ---
+            loader.load('duplex.glb', (gltf) => {
+                house = gltf.scene;
+                house.position.set(0, 0, 0); // Ground position level
+                house.scale.set(1, 1, 1); // Agar ghar size me chota ya bada ho toh scale change kar sakte hain
+                
+                house.traverse((child) => {
+                    if (child.isMesh) {
+                        child.receiveShadow = true;
+                        child.castShadow = true;
+                    }
+                });
                 scene.add(house);
-                console.log("House successfully loaded!");
-            },
-            undefined,
-            function (error) { 
-                console.error('House load nahi hua! Check path aur file name.', error); 
-            }
-        );
+                checkLoading();
+            }, undefined, (err) => {
+                console.error(err);
+                document.getElementById('loading').innerText = "House Model load nahi hua! Check path.";
+            });
 
-        window.addEventListener('resize', () => {
+            // --- LOAD GHOST MODEL ---
+            loader.load('cloth_ghost.glb', (gltf) => {
+                ghost = gltf.scene;
+                ghost.position.set(0, 0, -6); // Spawns slightly away inside the house
+                ghost.scale.set(0.85, 0.85, 0.85); 
+                
+                ghost.traverse((child) => {
+                    if (child.isMesh) child.castShadow = true;
+                });
+                scene.add(ghost);
+
+                if (gltf.animations && gltf.animations.length > 0) {
+                    mixer = new THREE.AnimationMixer(ghost);
+                    mixer.clipAction(gltf.animations[0]).play();
+                }
+                checkLoading();
+            }, undefined, (err) => {
+                console.error(err);
+                document.getElementById('loading').innerText = "Ghost Model load nahi hua! Check path.";
+            });
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', (e) => handleKeys(e, true));
+            document.addEventListener('keyup', (e) => handleKeys(e, false));
+            document.addEventListener('mousemove', onMouseMove);
+
+            // Pointer Lock UI
+            const inst = document.getElementById('instructions');
+            inst.addEventListener('click', () => {
+                if(!isGameOver) renderer.domElement.requestPointerLock();
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                if (isGameOver) return;
+                if (document.pointerLockElement === renderer.domElement) {
+                    inst.style.display = 'none';
+                    isPaused = false;
+                } else {
+                    inst.style.display = 'block';
+                    isPaused = true;
+                }
+            });
+
+            document.getElementById('btn-retry').addEventListener('click', resetGame);
+
+            animate();
+        }
+
+        function createGroundFlashlight() {
+            const flashGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 12);
+            const flashMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
+            flashlightDropped = new THREE.Mesh(flashGeo, flashMat);
+            flashlightDropped.rotation.z = Math.PI / 2;
+            flashlightDropped.position.set(0, 0.1, -2); // Placed inside the house in front of player
+            scene.add(flashlightDropped);
+
+            flashlightGlow = new THREE.PointLight(0x00ff00, 2, 3);
+            flashlightGlow.position.copy(flashlightDropped.position);
+            scene.add(flashlightGlow);
+        }
+
+        function handleKeys(e, isDown) {
+            if (isGameOver) return;
+            const key = e.key.toLowerCase();
+            if (key === 'w') keys.w = isDown;
+            if (key === 'a') keys.a = isDown;
+            if (key === 's') keys.s = isDown;
+            if (key === 'd') keys.d = isDown;
+            if (key === 'e' && isDown && !hasFlashlight) {
+                let dist = camera.position.distanceTo(flashlightDropped.position);
+                if (dist < 3) {
+                    hasFlashlight = true;
+                    flashlight.visible = true;
+                    scene.remove(flashlightDropped);
+                    scene.remove(flashlightGlow);
+                    document.getElementById('flashlight-status').innerText = "UTHA LI HAI (Active)";
+                    document.getElementById('flashlight-status').style.color = "#00ff00";
+                }
+            }
+        }
+
+        function onMouseMove(e) {
+            if (isPaused || isGameOver) return;
+            camera.rotation.y -= e.movementX * 0.0025; 
+            camera.rotation.x -= e.movementY * 0.0025; 
+            camera.rotation.x = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, camera.rotation.x));
+            camera.rotation.z = 0;
+        }
+
+        function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+        }
 
-        // 5. Game Loop
-        function animate() {
-            requestAnimationFrame(animate);
+        function triggerGameOver() {
+            isGameOver = true;
+            document.exitPointerLock();
+            
+            document.getElementById('gameover').style.display = 'block';
+            document.getElementById('instructions').style.display = 'none';
 
-            if (controls.isLocked) {
-                if (keys.w) controls.moveForward(moveSpeed);
-                if (keys.s) controls.moveForward(-moveSpeed);
-                if (keys.a) controls.moveRight(-moveSpeed);
-                if (keys.d) controls.moveRight(moveSpeed);
+            camera.rotation.z = 0;
+            camera.rotation.x = 0; 
+            
+            if (ghost) {
+                camera.lookAt(ghost.position.x, ghost.position.y + 1, ghost.position.z);
+            }
+        }
+
+        function resetGame() {
+            isGameOver = false;
+            isPaused = true;
+            hasFlashlight = false;
+
+            document.getElementById('gameover').style.display = 'none';
+            document.getElementById('instructions').style.display = 'block';
+            document.getElementById('flashlight-status').innerText = "ZAMEEN PAR HAI (Look down & Press 'E' to Pick)";
+            document.getElementById('flashlight-status').style.color = "#ff3333";
+
+            player.pos.set(0, 1.6, 0); // Reset inside house
+            camera.position.copy(player.pos);
+            camera.rotation.set(0, 0, 0);
+
+            if (ghost) {
+                ghost.position.set(0, 0, -6);
             }
 
-            // Flashlight movement
-            flashLight.position.copy(camera.position);
-            const targetPosition = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).add(camera.position);
-            flashLight.target.position.copy(targetPosition);
+            flashlight.visible = false;
+            scene.remove(flashlightDropped);
+            scene.remove(flashlightGlow);
+            createGroundFlashlight();
+
+            keys.w = keys.a = keys.s = keys.d = keys.e = false;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (isGameOver) {
+                renderer.render(scene, camera);
+                return; 
+            }
+            
+            if (isPaused) return;
+
+            const delta = clock.getDelta();
+            if (mixer) mixer.update(delta);
+
+            // Movement vectors
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            
+            forward.y = 0; forward.normalize();
+            right.y = 0; right.normalize();
+
+            // WASD Movement Execution with Adjusted Speeds
+            if (keys.w) player.pos.addScaledVector(forward, player.forwardSpeed);
+            if (keys.s) player.pos.addScaledVector(forward, -player.strafeSpeed);
+            if (keys.d) player.pos.addScaledVector(right, player.strafeSpeed);   
+            if (keys.a) player.pos.addScaledVector(right, -player.strafeSpeed);  
+
+            camera.position.copy(player.pos);
+
+            if (hasFlashlight) {
+                flashlight.position.copy(camera.position);
+                const flashDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                flashlight.target.position.copy(camera.position).add(flashDir);
+            }
+
+            // Ghost AI
+            if (ghost) {
+                const dir = new THREE.Vector3().subVectors(player.pos, ghost.position);
+                dir.y = 0; 
+                dir.normalize();
+
+                ghost.position.addScaledVector(dir, ghostSpeed);
+                ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
+                ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2) * 0.12;
+
+                // Kill Distance check
+                let distToPlayer = player.pos.distanceTo(ghost.position);
+                if (distToPlayer < killDistance) {
+                    triggerGameOver();
+                }
+            }
 
             renderer.render(scene, camera);
         }
-        animate();
+
+        init();
     </script>
 </body>
 </html>
