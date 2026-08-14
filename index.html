@@ -68,7 +68,8 @@
             • <b>WASD</b> = Move Around (S/A/D are very slow!)<br>
             • <b>Mouse</b> = Look Around (Look down at your feet!)<br>
             • <b>E</b> = Pick Flashlight (When close to it)<br>
-            • <b>ESC</b> = Pause Game & Release Mouse
+            • <b>ESC</b> = Pause Game & Release Mouse<br>
+            • Ghost sirf tab chase karega jab wo aapki screen par nahi hoga!
         </p>
     </div>
 
@@ -94,8 +95,18 @@
         };
 
         const keys = { w: false, a: false, s: false, d: false, e: false };
-        const ghostSpeed = 0.068; 
+
+        // --- GHOST "RED LIGHT / GREEN LIGHT" AI SETTINGS ---
+        const ghostSpeed = 0.068;          // full chase speed
         const killDistance = 1.2; 
+        const stopDuration = 0.5;          // seconds it takes to fully stop once seen
+        let ghostState = 'moving';         // 'moving' | 'stopping' | 'frozen'
+        let stopTimer = 0;
+        let ghostSpeedCurrent = ghostSpeed;
+
+        // Reusable objects for the visibility (frustum) check
+        const frustum = new THREE.Frustum();
+        const projScreenMatrix = new THREE.Matrix4();
 
         let modelsLoaded = 0;
         const totalModels = 2; 
@@ -296,12 +307,73 @@
                 ghost.position.set(0, 0, -6);
             }
 
+            // Reset ghost AI state
+            ghostState = 'moving';
+            stopTimer = 0;
+            ghostSpeedCurrent = ghostSpeed;
+
             flashlight.visible = false;
             scene.remove(flashlightDropped);
             scene.remove(flashlightGlow);
             createGroundFlashlight();
 
             keys.w = keys.a = keys.s = keys.d = keys.e = false;
+        }
+
+        // Checks whether a world-space point is currently inside the camera's view (on-screen)
+        function isPointOnScreen(point) {
+            projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+            frustum.setFromProjectionMatrix(projScreenMatrix);
+            return frustum.containsPoint(point);
+        }
+
+        function updateGhostAI(delta) {
+            if (!ghost) return;
+
+            // Use the ghost's "head" height so it doesn't get lost behind the floor plane
+            const ghostViewPoint = new THREE.Vector3(ghost.position.x, ghost.position.y + 1.0, ghost.position.z);
+            const isVisible = isPointOnScreen(ghostViewPoint);
+
+            if (isVisible) {
+                if (ghostState === 'moving') {
+                    // Just entered view -> start the visible slow-down
+                    ghostState = 'stopping';
+                    stopTimer = 0;
+                }
+                if (ghostState === 'stopping') {
+                    stopTimer += delta;
+                    const t = Math.min(stopTimer / stopDuration, 1);
+                    ghostSpeedCurrent = ghostSpeed * (1 - t); // linear decel to 0
+                    if (t >= 1) {
+                        ghostSpeedCurrent = 0;
+                        ghostState = 'frozen';
+                    }
+                }
+                // if 'frozen', stays at 0 speed, does nothing extra
+            } else {
+                // Not on screen -> always free to chase at full speed
+                ghostState = 'moving';
+                stopTimer = 0;
+                ghostSpeedCurrent = ghostSpeed;
+            }
+
+            const dir = new THREE.Vector3().subVectors(player.pos, ghost.position);
+            dir.y = 0;
+            if (dir.lengthSq() > 0.0001) dir.normalize();
+
+            if (ghostSpeedCurrent > 0) {
+                ghost.position.addScaledVector(dir, ghostSpeedCurrent);
+            }
+
+            ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
+            ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2) * 0.12;
+
+            // Distance/kill check runs every frame regardless of state,
+            // so it's consistent and never "randomly" skips a kill.
+            const distToPlayer = player.pos.distanceTo(ghost.position);
+            if (distToPlayer < killDistance) {
+                triggerGameOver();
+            }
         }
 
         function animate() {
@@ -339,21 +411,7 @@
                 flashlight.target.position.copy(camera.position).add(flashDir);
             }
 
-            // Ghost AI only works when game is active
-            if (ghost) {
-                const dir = new THREE.Vector3().subVectors(player.pos, ghost.position);
-                dir.y = 0; 
-                dir.normalize();
-
-                ghost.position.addScaledVector(dir, ghostSpeed);
-                ghost.lookAt(player.pos.x, ghost.position.y, player.pos.z);
-                ghost.position.y = 0.5 + Math.sin(clock.getElapsedTime() * 2) * 0.12;
-
-                let distToPlayer = player.pos.distanceTo(ghost.position);
-                if (distToPlayer < killDistance) {
-                    triggerGameOver();
-                }
-            }
+            updateGhostAI(delta);
 
             renderer.render(scene, camera);
         }
